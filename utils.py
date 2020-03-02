@@ -1,3 +1,6 @@
+import tensorflow as tf
+from tensorflow import keras
+import math
 
 def mesh_grid(h):
     '''
@@ -117,7 +120,7 @@ def silhouette_loss(input_img, prob, z, vh=128, vw=128):
     return sill 
 
 
-def variance_loss(uv, prob, vh):
+def variance_loss(uv, prob, vh=128):
     '''
     uv is in ndc
     '''    
