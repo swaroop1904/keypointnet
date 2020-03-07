@@ -1,6 +1,10 @@
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow.keras.layers import Activation 
 import math
+import os
+import numpy as np
+from copy import deepcopy
 
 def mesh_grid(h):
     '''
@@ -8,20 +12,22 @@ def mesh_grid(h):
     '''
     r = np.arange(0.5, h, 1) / (h / 2) - 1
     xx, yy = tf.meshgrid(r, -r)
-    return tf.to_float(xx), tf.to_float(yy)
+    return tf.cast(xx, tf.float32), tf.cast(yy, tf.float32)
 
-def post_process_kp(prob, z):
+def post_process_kp(prob, z, num_kp=10, vh=128, vw=128):
     '''
     expected value of uv and z
     uv is in normalized image coordinates systen
     '''
-    prob = prob[0,3,1,2]
-    z = z[0,3,1,2]
 
-    prob = prob.reshape([-1, num_kp, vh*vw])
+
+    prob = tf.transpose(prob, [0,3,1,2])
+    z = tf.transpose(z, [0,3,1,2])
+
+    prob = tf.reshape(prob, [-1, num_kp, vh*vw])
 
     prob = Activation('softmax')(prob)
-    prob = prob.reshape([-1, num_kp, vh, vw])
+    prob = tf.reshape(prob, [-1, num_kp, vh, vw])
 
     # haven't added the visualization code
     
@@ -35,13 +41,26 @@ def post_process_kp(prob, z):
 
     return uv, z
 
-def post_process_orient(orient, vh=128, vw=128, anneal=1, orient_gt=None):
+def post_process_orient(orient_prob, vh=128, vw=128, anneal=1, orient_gt=None):
     '''
     calculates the orientation of the orient network
     it is equal to orient_gt for train and orient_pred for test
     it is tiled to match the shape of the images
     '''
-    orient_pred = tf.maximum(0.0, tf.sign(orient[:,0,:1] - orient[:,1,:1]))
+
+    orient_prob = tf.transpose(orient_prob, [0,3,1,2])
+    orient_prob = tf.reshape(orient_prob, [-1, 2, vh*vw])
+    orient_prob = tf.nn.softmax(orient_prob)
+    orient_prob = tf.reshape(orient_prob, [-1, 2, vh, vw])
+
+    xx, yy = mesh_grid(vh)
+    
+    sx = tf.reduce_sum(orient_prob*xx, axis=[2,3])
+    sy = tf.reduce_sum(orient_prob*yy, axis=[2,3])
+
+    out_xy = tf.reshape(tf.stack([sx, sy], -1), [-1, 2, 2])
+
+    orient_pred = tf.maximum(0.0, tf.sign(out_xy[:,0,:1] - out_xy[:,1,:1]))
 
     if orient_gt:
         orient_gt = tf.maximum(0, tf.sign(orient_gt[:,:,1]))
@@ -49,18 +68,18 @@ def post_process_orient(orient, vh=128, vw=128, anneal=1, orient_gt=None):
     else:
         orient = orient_pred
 
-    orient_tiled = tf.tile(tf.expand_dims(tf.expand_dims(orient, 1), 1),
+    orient_tiled = tf.tile(tf.expand_dims(tf.expand_dims(orient_pred, 1), 1),
                            [1, vh, vw, 1]) 
 
-    return orient_tiled
+    return out_xy, orient_tiled
 
 def estimate_rotation(obj0, obj1, noise=0.1):
     '''
     estimates the rotation given coordinates of the keypoints of two views
     '''
 
-    obj0 += tf.random_normal(tf.shape(obj0), mean=0, stddev=noise)
-    obj1 += tf.random_normal(tf.shape(obj1), mean=0, stddev=noise)
+    obj0 += tf.random.normal(tf.shape(obj0), mean=0, stddev=noise)
+    obj1 += tf.random.normal(tf.shape(obj1), mean=0, stddev=noise)
 
     mean0 = tf.reduce_mean(obj0, 1, keepdims=True)
     mean1 = tf.reduce_mean(obj1, 1, keepdims=True)
@@ -68,19 +87,21 @@ def estimate_rotation(obj0, obj1, noise=0.1):
     obj0 = obj0 - mean0
     obj1 = obj1 - mean1
     
-    cov = tf.matmul(tf.transpose(obj0), obj1)
+    cov = tf.matmul(tf.transpose(obj0, [0,2,1]), obj1)
+
     _, u, v = tf.linalg.svd(cov, full_matrices=True)
 
-    det = tf.matrix_determinant(tf.matmul(v,tf.transpose(u)))
+    det = tf.linalg.det(tf.matmul(v,tf.transpose(u, [0,2,1])))
 
     ud = tf.concat(
-        [u[:,:,:-1], u[:,:,-1:] * tf.expand_dims(tf.expand_dims(d,1),1)],
+        [u[:,:,:-1], u[:,:,-1:] * tf.expand_dims(tf.expand_dims(det,1),1)],
         axis=2)
 
     return tf.matmul(ud, v, transpose_b=True)
 
 def pose_loss(gt_homogeneous, obj0, obj1, noise):
     estimated_rot_t = estimate_rotation(obj0, obj1, noise)
+
     gt_rotation = gt_homogeneous[:, :3, :3]
     frob = tf.sqrt(tf.reduce_sum(tf.square(estimated_rot_t - gt_rotation), axis=[1,2]))
 
@@ -98,32 +119,36 @@ def mvc_loss(uv0, uv1):
     return tf.reduce_mean(diff)
     
 
-def silhouette_loss(input_img, prob, z, vh=128, vw=128):
+def silhouette_loss(input_img, prob, z, vh=128, vw=128, num_kp=10):
     '''
     '''
+
     uv, _ = post_process_kp(prob, z)
 
     mask = input_img[..., 3]
     mask = tf.cast(tf.greater(mask, tf.zeros_like(mask)), dtype=tf.float32)
 
-    prob = prob[0,3,1,2]
-    prob = prob.reshape([-1, num_kp, vh*vw])
+
+
+    prob = tf.transpose(prob, [0,3,1,2])
+    prob = tf.reshape(prob, [-1, num_kp, vh*vw])
 
     prob = Activation('softmax')(prob)
-    prob = prob.reshape([-1, num_kp, vh, vw])
+    prob = tf.reshape(prob, [-1, num_kp, vh, vw])
 
     sill = tf.reduce_sum(prob * tf.expand_dims(mask, 1), axis=[2,3])
-    sill = tf.reduce_mean(-tf.log(sill + 1e-12))
+    sill = tf.reduce_mean(-tf.math.log(sill + 1e-12))
 
     v_loss = variance_loss(uv, prob, vh)
 
     return sill 
 
 
-def variance_loss(uv, prob, vh=128):
+def variance_loss(uv, prob, vh=128, vw=128, num_kp=10):
     '''
     uv is in ndc
     '''    
+    prob = tf.reshape(prob, [-1, num_kp, vh, vw])
     xx, yy = mesh_grid(vh)
 
     xy = tf.stack([xx, yy], axis=2)
@@ -148,7 +173,7 @@ def separation_loss(xyz, delta, batch_size):
     diff_sq = tf.square(t1-t2)
     lensqr = tf.reduce_sum(diff_sq, axis=2)
 
-    return tf.reduce_sum(tf.maximum(-lensqr+delta, 0.0)) / tf.to_float(num_kp * batch_size * 2)
+    return tf.reduce_sum(tf.maximum(-lensqr+delta, 0.0)) / tf.cast(num_kp * batch_size * 2, tf.float32)
 
 
 class Transformer(object):
@@ -177,7 +202,7 @@ class Transformer(object):
     # transposed of inversed projection matrix.
     self.pinv_t = tf.constant([[1.0 / p[0, 0], 0, 0,
                                 0], [0, 1.0 / p[1, 1], 0, 0], [0, 0, 1, 0],
-                               [0, 0, 0, 1]])
+                               [0, 0, 0, 1]], dtype=tf.float32)
     self.f = p[0, 0]
 
   def project(self, xyzw):
@@ -194,9 +219,9 @@ class Transformer(object):
 
     def batch_matmul(a, b):
       return tf.reshape(
-          tf.matmul(tf.reshape(a, [-1, a.shape[2].value]), b),
-          [-1, a.shape[1].value, a.shape[2].value])
+          tf.matmul(tf.reshape(a, [-1, a.shape[2]]), b),
+          [-1, a.shape[1], a.shape[2]])
 
     return batch_matmul(
-        tf.concat([xy[:, :, :2], z, tf.ones_like(z)], axis=2), self.pinv_t)
+        tf.concat([xy[:, :, :2], z, tf.ones_like(z, dtype=tf.float32)], axis=2), self.pinv_t)
 

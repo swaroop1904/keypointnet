@@ -27,7 +27,7 @@ def orientation_model(vh=128, vw=128):
     The output is defined in normalized camera coordinates
     '''
     inp, bb_op = get_dilated_backbone(vh, vw, 3, 32)
-    prob = Conv2D(2, 3, dilation_rate=1)(bb_op)
+    prob = Conv2D(2, 3, dilation_rate=1, padding='same')(bb_op)
 
     model = Model(inp, prob)
     return model
