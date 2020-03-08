@@ -121,8 +121,15 @@ def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, bat
       t.unproject(uvz[1])[:, :, :3],
       noise)
 
+    train_sil_loss(sil_loss)
+    train_var_loss(var_loss)
+    train_sep_loss(sep_loss)
+    train_mvc_loss(mv_loss)
+    train_pose_loss(p_loss)
 
     tot_loss = sil_loss + var_loss + sep_loss + mv_loss + p_loss
+
+    train_total_loss(tot_loss)
     return tot_loss
 
 def keypointnet_train_step(data, batch_size):
@@ -190,11 +197,35 @@ if __name__ == '__main__':
     orient_net.save_weights('orientation_network.h5')
 
     keypointnet = keypoint_model()
+  
+    train_sil_loss = tf.keras.metrics.Mean('train_sil_loss', dtype=tf.float32)
+    train_var_loss = tf.keras.metrics.Mean('train_var_loss', dtype=tf.float32)
+    train_mvc_loss = tf.keras.metrics.Mean('train_mvc_loss', dtype=tf.float32)
+    train_sep_loss = tf.keras.metrics.Mean('train_sep_loss', dtype=tf.float32)
+    train_pose_loss = tf.keras.metrics.Mean('train_pose_loss', dtype=tf.float32)
+    train_total_loss = tf.keras.metrics.Mean('train_total_loss', dtype=tf.float32)
 
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = 'logs/keypoint/' + current_time + '/train'
+    train_summary_writer = tf.summary.create_file_writer(train_log_dir)  
 
     for epoch in range(num_epochs):
         for data in dataset:
             keypointnet_train_step(data, batch_size)
+        with train_summary_writer.as_default():
+            tf.summary.scalar('sil_loss', train_sill_loss.result())
+            tf.summary.scalar('var_loss', train_var_loss.result())
+            tf.summary.scalar('mvc_loss', train_mvc_loss.result())
+            tf.summary.scalar('sep_loss', train_sep_loss.result())
+            tf.summary.scalar('pose_loss', train_pose_loss.result())
+            tf.summary.scalar('total_loss', train_total_loss.result())
+        
+        train_sill_loss.reset_states()
+        train_var_loss.reset_states()
+        train_mvc_loss.reset_states()
+        train_sep_loss.reset_states()
+        train_pose_loss.reset_states()
+        train_total_loss.reset_states()
 
     keypointnet.save_weights('keypoint_network.h5')
 
