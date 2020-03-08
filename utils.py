@@ -14,6 +14,53 @@ def mesh_grid(h):
     xx, yy = tf.meshgrid(r, -r)
     return tf.cast(xx, tf.float32), tf.cast(yy, tf.float32)
 
+# when testing need to set anneal to 0 
+def post_process_orient(orient_prob, anneal=1, orient_gt=None, vh=128, vw=128):
+    '''
+    post process the orient network output
+
+    input:
+          orient_prob: (batch_size, 128, 128, 2)
+          anneal: 1 -> use gt orientation (used during training)
+                  0 -> use orient_pred (used during inference)
+          orient_gt: camera co-ordinates of NDC points (1,0,0) and (-1,0,0)
+                     (batch_size, 2, 2)
+    output:
+           out_xy: predicted camera co-ordinates of NDC points (1,0,0) and (-1,0,0)
+                   (batch_size, 2, 2)
+           orient_tiled: Tiled tensor for the orientation to be fed along with image
+                         to the keypoint network
+                    (batch_size, 128, 128, 1)
+    '''
+
+    orient_prob = tf.transpose(orient_prob, [0,3,1,2])
+    orient_prob = tf.reshape(orient_prob, [-1, 2, vh*vw])
+    orient_prob = tf.nn.softmax(orient_prob)
+    orient_prob = tf.reshape(orient_prob, [-1, 2, vh, vw])
+
+    xx, yy = mesh_grid(vh)
+    
+    sx = tf.reduce_sum(orient_prob*xx, axis=[2,3])
+    sy = tf.reduce_sum(orient_prob*yy, axis=[2,3])
+
+    # actual output of orient network
+    out_xy = tf.reshape(tf.stack([sx, sy], -1), [-1, 2, 2])
+
+    # orientation of the output. Calculated to be given as i/p to keypointnet
+    orient_pred = tf.maximum(0.0, tf.sign(out_xy[:,0,:1] - out_xy[:,1,:1]))
+
+    if orient_gt:
+        orient_gt = tf.maximum(0, tf.sign(orient_gt[...,1]))
+        orient = tf.round(orient_gt*anneal + orient_pred *(1-anneal)) 
+    else:
+        orient = orient_pred
+
+    orient_tiled = tf.tile(tf.expand_dims(tf.expand_dims(orient_pred, 1), 1),
+                           [1, vh, vw, 1]) 
+
+    return out_xy, orient_tiled
+
+
 def post_process_kp(prob, z, num_kp=10, vh=128, vw=128):
     '''
     expected value of uv and z
@@ -40,38 +87,6 @@ def post_process_kp(prob, z, num_kp=10, vh=128, vw=128):
     uv = tf.reshape(tf.stack([sx,sy], -1), [-1, num_kp, 2])
 
     return uv, z
-
-def post_process_orient(orient_prob, vh=128, vw=128, anneal=1, orient_gt=None):
-    '''
-    calculates the orientation of the orient network
-    it is equal to orient_gt for train and orient_pred for test
-    it is tiled to match the shape of the images
-    '''
-
-    orient_prob = tf.transpose(orient_prob, [0,3,1,2])
-    orient_prob = tf.reshape(orient_prob, [-1, 2, vh*vw])
-    orient_prob = tf.nn.softmax(orient_prob)
-    orient_prob = tf.reshape(orient_prob, [-1, 2, vh, vw])
-
-    xx, yy = mesh_grid(vh)
-    
-    sx = tf.reduce_sum(orient_prob*xx, axis=[2,3])
-    sy = tf.reduce_sum(orient_prob*yy, axis=[2,3])
-
-    out_xy = tf.reshape(tf.stack([sx, sy], -1), [-1, 2, 2])
-
-    orient_pred = tf.maximum(0.0, tf.sign(out_xy[:,0,:1] - out_xy[:,1,:1]))
-
-    if orient_gt:
-        orient_gt = tf.maximum(0, tf.sign(orient_gt[:,:,1]))
-        orient = tf.round(orient_gt*anneal + orient_pred *(1-anneal)) 
-    else:
-        orient = orient_pred
-
-    orient_tiled = tf.tile(tf.expand_dims(tf.expand_dims(orient_pred, 1), 1),
-                           [1, vh, vw, 1]) 
-
-    return out_xy, orient_tiled
 
 def estimate_rotation(obj0, obj1, noise=0.1):
     '''

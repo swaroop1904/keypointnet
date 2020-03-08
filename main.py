@@ -5,7 +5,8 @@ from utils import Transformer
 import os
 import numpy as np
 import tensorflow as tf
-from IPython.core.debugger import set_trace
+import datetime
+#from IPython.core.debugger import set_trace
 
 def parser(serialized_example):
     """Parses a single tf.Example into image and label tensors."""
@@ -47,6 +48,13 @@ def create_data_generator(filenames, batch_size):
     return dataset
 
 def orientation_loss(orient, mv):
+    '''
+    inputs: 
+           orient: (batch_size,2,2)
+           mv: model view matrix (batch_size, 4, 4)
+    output:
+           orient_loss: (batch_size, 2)
+    '''
     xp_axis = tf.tile(
         tf.constant([[[1.0, 0, 0, 1], [-1.0, 0, 0, 1]]]), [tf.shape(orient)[0], 1, 1]
         )
@@ -54,7 +62,7 @@ def orientation_loss(orient, mv):
     xp = tf.matmul(xp_axis, mv)
     xp = t.project(xp)
 
-    orient_loss = tf.reduce_mean(tf.keras.losses.MSE(orient[...,:2], xp[..., :2]))
+    orient_loss = tf.keras.losses.MSE(orient, xp[..., :2])
     return orient_loss
 
 def orient_net_train_step(rgb, mv):
@@ -64,7 +72,7 @@ def orient_net_train_step(rgb, mv):
         loss = orientation_loss(post_orient, mv)
     grads = tape.gradient(loss, orient_net.trainable_variables)
     optim.apply_gradients(zip(grads, orient_net.trainable_variables))
-
+    train_orient_loss(loss)
     return orient
 
 
@@ -139,7 +147,7 @@ if __name__ == '__main__':
     dataset_dir = '/home/swaroop/Documents/others/MS/aml/project/chairs_with_keypoints/'
     t = Transformer(vw, vh, dataset_dir)
 
-    batch_size=2
+    batch_size=256
 
     # remove the files other tf record from here
     filenames = [dataset_dir + val for val in os.listdir(dataset_dir) if val.endswith('tfrecord')  ]
@@ -149,15 +157,28 @@ if __name__ == '__main__':
     keypointnet = keypoint_model()
 
     optim = tf.keras.optimizers.Adam(lr=1e-3)
-    num_epochs = 2
+    num_epochs = 150
 
+    train_orient_loss = tf.keras.metrics.Mean('train_orient_loss', dtype=tf.float32)
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = 'logs/orient/' + current_time + '/train'
+    train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+
+    step = 0
     for epoch in range(num_epochs):
         for data in dataset:
             for i in range(2):
+                step += 1
                 rgb = data[f"img{i}"][..., :3]
                 mv = data[f"mv{i}"]
                 orient = orient_net_train_step(rgb, mv)
-    
+        with train_summary_writer.as_default():
+            tf.summary.scalar('loss_orient', train_orient_loss.result(), step=epoch)
+
+        print(f"steps per epoch: {step}")
+        print(f"loss per epoch: {train_orient_loss.result()}")
+        train_orient_loss.reset_states()
+
     orient_net.save_weights('orientation_network.h5')
 
     for epoch in range(num_epochs):
