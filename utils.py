@@ -188,8 +188,6 @@ class Transformer(object):
     return np.array([[float(y) for y in x.strip().split(" ")] for x in lines])
 
   def __read_projection_matrix(self, filename):
-    if not os.path.exists(filename):
-      filename = "/cns/vz-d/home/supasorn/datasets/cars/projection.txt"
     with open(filename, "r") as f:
       lines = f.readlines()
     return self.__get_matrix(lines)

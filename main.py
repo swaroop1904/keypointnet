@@ -164,7 +164,7 @@ if __name__ == '__main__':
         for data in dataset:
             keypointnet_train_step(data, batch_size)
 
-    keypoint_net.save_weights('keypoint_network.h5')
+    keypointnet.save_weights('keypoint_network.h5')
 
 
 
