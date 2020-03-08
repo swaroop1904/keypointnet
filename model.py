@@ -6,7 +6,9 @@ import math
 
 def get_dilated_backbone(vh, vw, inp_c, num_filters):
     '''
-    creates backbone architecture as defined in keypointnet paper
+    creates a 12 layer backbone CNN model with varied dilation rates.
+    output: 
+            (batch_size, 128, 128, num_filters)
     '''
     inp = Input(shape=(vh, vw, inp_c))
     x = inp
@@ -23,8 +25,8 @@ def get_dilated_backbone(vh, vw, inp_c, num_filters):
 def orientation_model(vh=128, vw=128):
     '''
     creates orientation networks with 32 filters per layer
-    output: batch_size * 2 * 2 
-    The output is defined in normalized camera coordinates
+    output: 
+            batch_size * 128 * 128 * 2
     '''
     inp, bb_op = get_dilated_backbone(vh, vw, 3, 32)
     prob = Conv2D(2, 3, dilation_rate=1, padding='same')(bb_op)
