@@ -77,6 +77,13 @@ def orient_net_train_step(rgb, mv):
 
 
 def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, batch_size=2):
+    '''
+    calculates the loss for the keypointnet
+    inputs:
+           prob, z: list of the outputs of keypoint network for each of the image
+                    (batch_size,  128, 128, 10)
+        
+    '''
     sil_loss = 0.0
     var_loss = 0.0
     sep_loss = 0.0
@@ -95,14 +102,13 @@ def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, bat
         sil_loss += silhouette_loss(images[i], prob[i], z[i])
         var_loss += variance_loss(exp_uv, prob[i])
 
-        exp_uv = tf.reshape(exp_uv, [-1, num_kp, 2])
         exp_z = tf.reshape(exp_z, [-1, num_kp, 1])
 
         uvz[i] = tf.concat([exp_uv, exp_z], axis=2)
-
         world_coords = tf.matmul(t.unproject(uvz[i]), mvi_list[i])
 
         # [batch, num_kp, 3]
+        # the projection of the object in the second image onto first
         uvz_proj[i] = t.project(tf.matmul(world_coords, mv_list[1 - i]))
 
     for i in range(2):
@@ -131,13 +137,17 @@ def keypointnet_train_step(data, batch_size):
             rgb = data[f"img{i}"][..., :3]
             mv = data[f"mv{i}"]
             mvi = data[f"mvi{i}"]
+            orient_gt = data[f"lr{i}"]
+            
+            # orient net output is not utilized during training
+            orient = orient_net(rgb)
+            _, tiled_orientation = post_process_orient(orient, orient_gt=orient_gt)
+            rgbo = tf.concat([rgb, tiled_orientation], axis=3)
+            
+            prob[i], z[i] = keypointnet(rgbo)
             images[i] = data[f"img{i}"]
             mv_list[i] = mv
             mvi_list[i] = mvi
-            orient = orient_net(rgb)
-            _, tiled_orientation = post_process_orient(orient)
-            rgbo = tf.concat([rgb, tiled_orientation], axis=3)
-            prob[i], z[i] = keypointnet(rgbo)
         loss = keypoint_loss(prob, z, images, mv_list, mvi_list, batch_size)
     grads = tape.gradient(loss, keypointnet.trainable_variables)
     optim.apply_gradients(zip(grads, keypointnet.trainable_variables))
@@ -147,15 +157,13 @@ if __name__ == '__main__':
     dataset_dir = '/home/swaroop/Documents/others/MS/aml/project/chairs_with_keypoints/'
     t = Transformer(vw, vh, dataset_dir)
 
-    batch_size=256
+    batch_size=2
 
     # remove the files other tf record from here
     filenames = [dataset_dir + val for val in os.listdir(dataset_dir) if val.endswith('tfrecord')  ]
     dataset = create_data_generator(filenames, batch_size=batch_size)
 
     orient_net = orientation_model()
-    keypointnet = keypoint_model()
-
     optim = tf.keras.optimizers.Adam(lr=1e-3)
     num_epochs = 150
 
@@ -180,6 +188,9 @@ if __name__ == '__main__':
         train_orient_loss.reset_states()
 
     orient_net.save_weights('orientation_network.h5')
+
+    keypointnet = keypoint_model()
+
 
     for epoch in range(num_epochs):
         for data in dataset:
