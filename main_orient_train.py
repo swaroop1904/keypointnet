@@ -102,7 +102,7 @@ if __name__ == '__main__':
                 mv = data[f"mv{i}"]
                 orient = orient_net_train_step(rgb, mv)
             if idx % 50000 == 0:
-              with train_summary_writer.as_default():
-                tf.summary.scalar('loss_orient', train_orient_loss.result(), step=int(idx/50000))   
-              train_orient_loss.reset_states()
-              orient_net.save_weights('orientation_network.h5')       
+                with train_summary_writer.as_default():
+                    tf.summary.scalar('loss_orient', train_orient_loss.result(), step=int(idx/50000))   
+                train_orient_loss.reset_states()
+                orient_net.save_weights('orientation_network.h5')       
