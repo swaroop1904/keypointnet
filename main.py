@@ -227,11 +227,4 @@ if __name__ == '__main__':
         train_pose_loss.reset_states()
         train_total_loss.reset_states()
 
-    keypointnet.save_weights('keypoint_network.h5')
-
-
-
-
-
-
-        
+    keypointnet.save_weights('keypoint_network.h5')     

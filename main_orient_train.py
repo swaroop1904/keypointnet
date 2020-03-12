@@ -75,90 +75,6 @@ def orient_net_train_step(rgb, mv):
     train_orient_loss(loss)
     return orient
 
-
-def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, batch_size=2):
-    '''
-    calculates the loss for the keypointnet
-    inputs:
-           prob, z: list of the outputs of keypoint network for each of the image
-                    (batch_size,  128, 128, 10)
-        
-    '''
-    sil_loss = 0.0
-    var_loss = 0.0
-    sep_loss = 0.0
-    mv_loss = 0.0
-
-    tot_loss = 0.0
-
-    uvz = [None] * 2
-    uvz_proj = [None] * 2  # uvz coordinates projected on to the other view.
-    
-    noise = 0.1
-
-    for i in range(2):
-        #set_trace()
-        exp_uv, exp_z = post_process_kp(prob[i], z[i])
-        sil_loss += silhouette_loss(images[i], prob[i], z[i])
-        var_loss += variance_loss(exp_uv, prob[i])
-
-        exp_z = tf.reshape(exp_z, [-1, num_kp, 1])
-
-        uvz[i] = tf.concat([exp_uv, exp_z], axis=2)
-        world_coords = tf.matmul(t.unproject(uvz[i]), mvi_list[i])
-
-        # [batch, num_kp, 3]
-        # the projection of the object in the second image onto first
-        uvz_proj[i] = t.project(tf.matmul(world_coords, mv_list[1 - i]))
-
-    for i in range(2):
-        sep_loss += separation_loss(t.unproject(uvz[i])[:, :, :3], delta, batch_size)
-        mv_loss += mvc_loss(uvz_proj[i][:, :, :2], uvz[1 - i][:, :, :2])
-
-    p_loss = pose_loss(
-      tf.matmul(mvi_list[0], mv_list[1]),
-      t.unproject(uvz[0])[:, :, :3],
-      t.unproject(uvz[1])[:, :, :3],
-      noise)
-
-    train_sil_loss(sil_loss)
-    train_var_loss(var_loss)
-    train_sep_loss(sep_loss)
-    train_mvc_loss(mv_loss)
-    train_pose_loss(p_loss)
-
-    tot_loss = sil_loss + var_loss + sep_loss + mv_loss + p_loss
-
-    train_total_loss(tot_loss)
-    return tot_loss
-
-def keypointnet_train_step(data, batch_size):
-    with tf.GradientTape() as tape:
-        prob = [None, None]
-        z = [None, None]
-        images = [None, None]
-        mv_list = [None, None]
-        mvi_list = [None, None]
-
-        for i in range(2):
-            rgb = data[f"img{i}"][..., :3]
-            mv = data[f"mv{i}"]
-            mvi = data[f"mvi{i}"]
-            orient_gt = data[f"lr{i}"]
-            
-            # orient net output is not utilized during training
-            orient = orient_net(rgb)
-            _, tiled_orientation = post_process_orient(orient, orient_gt=orient_gt)
-            rgbo = tf.concat([rgb, tiled_orientation], axis=3)
-            
-            prob[i], z[i] = keypointnet(rgbo)
-            images[i] = data[f"img{i}"]
-            mv_list[i] = mv
-            mvi_list[i] = mvi
-        loss = keypoint_loss(prob, z, images, mv_list, mvi_list, batch_size)
-    grads = tape.gradient(loss, keypointnet.trainable_variables)
-    optim.apply_gradients(zip(grads, keypointnet.trainable_variables))
-
 if __name__ == '__main__':
     vw, vh = 128, 128
     dataset_dir = '/home/swaroop/Documents/others/MS/aml/project/chairs_with_keypoints/'
@@ -189,12 +105,4 @@ if __name__ == '__main__':
               with train_summary_writer.as_default():
                 tf.summary.scalar('loss_orient', train_orient_loss.result(), step=int(idx/50000))   
               train_orient_loss.reset_states()
-              orient_net.save_weights('orientation_network.h5')
-
-
-
-
-
-
-
-        
+              orient_net.save_weights('orientation_network.h5')       

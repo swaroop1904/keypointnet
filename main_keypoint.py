@@ -47,35 +47,6 @@ def create_data_generator(filenames, batch_size):
 
     return dataset
 
-def orientation_loss(orient, mv):
-    '''
-    inputs: 
-           orient: (batch_size,2,2)
-           mv: model view matrix (batch_size, 4, 4)
-    output:
-           orient_loss: (batch_size, 2)
-    '''
-    xp_axis = tf.tile(
-        tf.constant([[[1.0, 0, 0, 1], [-1.0, 0, 0, 1]]]), [tf.shape(orient)[0], 1, 1]
-        )
-
-    xp = tf.matmul(xp_axis, mv)
-    xp = t.project(xp)
-
-    orient_loss = tf.keras.losses.MSE(orient, xp[..., :2])
-    return orient_loss
-
-def orient_net_train_step(rgb, mv):
-    with tf.GradientTape() as tape:
-        orient = orient_net(rgb)
-        post_orient, _ = post_process_orient(orient)
-        loss = orientation_loss(post_orient, mv)
-    grads = tape.gradient(loss, orient_net.trainable_variables)
-    optim.apply_gradients(zip(grads, orient_net.trainable_variables))
-    train_orient_loss(loss)
-    return orient
-
-
 def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, batch_size=2):
     '''
     calculates the loss for the keypointnet
@@ -205,10 +176,3 @@ if __name__ == '__main__':
               train_pose_loss.reset_states()
               train_total_loss.reset_states()
               keypointnet.save_weights('keypoint_network.h5')
-
-
-
-
-
-
-        
