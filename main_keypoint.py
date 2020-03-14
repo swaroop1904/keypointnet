@@ -115,7 +115,7 @@ if __name__ == '__main__':
     for epoch in range(num_epochs):
         for idx, data in enumerate(dataset):
             keypointnet_train_step(data, batch_size)
-            if idx % 100000:
+            if idx % 100000 == 0:
                 print('sil_loss', train_sil_loss.result())
                 print('var', train_var_loss.result())
                 print('mvc loss', train_mvc_loss.result())
