@@ -1,51 +1,13 @@
-from model import keypoint_model, orientation_model
-from utils import post_process_orient, Transformer, post_process_kp
-from utils import pose_loss, variance_loss, separation_loss, silhouette_loss, mvc_loss, pose_loss
-from utils import Transformer
 import os
 import numpy as np
 import tensorflow as tf
 import datetime
-#from IPython.core.debugger import set_trace
-
-def parser(serialized_example):
-    """Parses a single tf.Example into image and label tensors."""
-    fs = tf.io.parse_single_example(
-        serialized_example,
-        features={
-            "img0": tf.io.FixedLenFeature([], tf.string),
-            "img1": tf.io.FixedLenFeature([], tf.string),
-            "mv0": tf.io.FixedLenFeature([16], tf.float32),
-            "mvi0": tf.io.FixedLenFeature([16], tf.float32),
-            "mv1": tf.io.FixedLenFeature([16], tf.float32),
-            "mvi1": tf.io.FixedLenFeature([16], tf.float32),
-        })
-
-    fs["img0"] = tf.math.divide(tf.cast(tf.image.decode_png(fs["img0"], 4), tf.float32), 255)
-    fs["img1"] = tf.math.divide(tf.cast(tf.image.decode_png(fs["img1"], 4), tf.float32), 255)
-
-    fs["img0"].set_shape([vh, vw, 4])
-    fs["img1"].set_shape([vh, vw, 4])
-
-
-    fs["mv1"] = tf.transpose(tf.reshape(fs["mv1"], [4, 4]), [1,0])
-    fs["mvi1"] = tf.transpose(tf.reshape(fs["mvi1"], [4, 4]), [1, 0])
-    fs["mv0"] = tf.transpose(tf.reshape(fs["mv0"], [4, 4]), [1, 0])
-    fs["mvi0"] = tf.transpose(tf.reshape(fs["mvi0"], [4, 4]), [1, 0])
-
-    fs["lr0"] = tf.convert_to_tensor([fs["mv0"][0]])
-    fs["lr1"] = tf.convert_to_tensor([fs["mv1"][0]])
-
-    return fs
-
-def create_data_generator(filenames, batch_size):
-    np.random.shuffle(filenames)
-    dataset = tf.data.TFRecordDataset(filenames)
-    dataset = dataset.map(parser, num_parallel_calls=4)
-    dataset = dataset.shuffle(400).repeat().batch(batch_size)
-    dataset = dataset.prefetch(buffer_size=50)
-
-    return dataset
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+from model import keypoint_model, orientation_model
+from utils import post_process_orient, Transformer, post_process_kp
+from utils import pose_loss, variance_loss, separation_loss, silhouette_loss, mvc_loss, pose_loss
+from utils import Transformer
+from data_generation import create_data_generator
 
 def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, batch_size=2):
     '''
@@ -66,14 +28,10 @@ def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, bat
     uvz_proj = [None] * 2  # uvz coordinates projected on to the other view.
     
     noise = 0.1
-
     for i in range(2):
-        #set_trace()
         exp_uv, exp_z = post_process_kp(prob[i], z[i])
         sil_loss += silhouette_loss(images[i], prob[i], z[i])
         var_loss += variance_loss(exp_uv, prob[i])
-
-        exp_z = tf.reshape(exp_z, [-1, num_kp, 1])
 
         uvz[i] = tf.concat([exp_uv, exp_z], axis=2)
         world_coords = tf.matmul(t.unproject(uvz[i]), mvi_list[i])
@@ -86,7 +44,7 @@ def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, bat
         sep_loss += separation_loss(t.unproject(uvz[i])[:, :, :3], delta, batch_size)
         mv_loss += mvc_loss(uvz_proj[i][:, :, :2], uvz[1 - i][:, :, :2])
 
-    p_loss = pose_loss(
+    _, p_loss = pose_loss(
       tf.matmul(mvi_list[0], mv_list[1]),
       t.unproject(uvz[0])[:, :, :3],
       t.unproject(uvz[1])[:, :, :3],
@@ -98,7 +56,7 @@ def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, bat
     train_mvc_loss(mv_loss)
     train_pose_loss(p_loss)
 
-    tot_loss = sil_loss + var_loss + sep_loss + mv_loss + p_loss
+    tot_loss = sil_loss + 0.5*var_loss + sep_loss + mv_loss + 0.2*p_loss
 
     train_total_loss(tot_loss)
     return tot_loss
@@ -135,7 +93,7 @@ if __name__ == '__main__':
     dataset_dir = '/home/swaroop/Documents/others/MS/aml/project/chairs_with_keypoints/'
     t = Transformer(vw, vh, dataset_dir)
 
-    batch_size=2
+    batch_size=1
 
     # remove the files other tf record from here
     filenames = [dataset_dir + val for val in os.listdir(dataset_dir) if val.endswith('tfrecord')  ]
@@ -143,7 +101,7 @@ if __name__ == '__main__':
 
     orient_net = orientation_model()
     optim = tf.keras.optimizers.Adam(lr=1e-3)
-    num_epochs = 1
+    num_epochs = 3
 
     keypointnet = keypoint_model()
     
@@ -154,25 +112,24 @@ if __name__ == '__main__':
     train_pose_loss = tf.keras.metrics.Mean('train_pose_loss', dtype=tf.float32)
     train_total_loss = tf.keras.metrics.Mean('train_total_loss', dtype=tf.float32)
 
-    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    train_log_dir = 'logs/keypoint/' + current_time + '/train'
-    train_summary_writer = tf.summary.create_file_writer(train_log_dir)  
-
     for epoch in range(num_epochs):
         for idx, data in enumerate(dataset):
             keypointnet_train_step(data, batch_size)
-            if idx % 50000:
-                with train_summary_writer.as_default():
-                    tf.summary.scalar('sil_loss', train_sill_loss.result(), step=int(idx/50000))
-                    tf.summary.scalar('var_loss', train_var_loss.result(), step=int(idx/50000))
-                    tf.summary.scalar('mvc_loss', train_mvc_loss.result(), step=int(idx/50000))
-                    tf.summary.scalar('sep_loss', train_sep_loss.result(), step=int(idx/50000))
-                    tf.summary.scalar('pose_loss', train_pose_loss.result(), step=int(idx/50000))
-                    tf.summary.scalar('total_loss', train_total_loss.result(), step=int(idx/50000))              
-                train_sill_loss.reset_states()
+            if idx % 100000:
+                print('sil_loss', train_sil_loss.result())
+                print('var', train_var_loss.result())
+                print('mvc loss', train_mvc_loss.result())
+                print('sep loss', train_sep_loss.result())
+                print('pose', train_pose_loss.result())
+                print('train', train_total_loss.result())
+                train_sil_loss.reset_states()
                 train_var_loss.reset_states()
                 train_mvc_loss.reset_states()
                 train_sep_loss.reset_states()
                 train_pose_loss.reset_states()
                 train_total_loss.reset_states()
                 keypointnet.save_weights('keypoint_network.h5')
+                
+        print("**"*40)
+        print("completed epoch")
+        print("**"*40)
