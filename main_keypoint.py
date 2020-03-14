@@ -2,7 +2,7 @@ import os
 import numpy as np
 import tensorflow as tf
 import datetime
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+#os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 from model import keypoint_model, orientation_model
 from utils import post_process_orient, Transformer, post_process_kp
 from utils import pose_loss, variance_loss, separation_loss, silhouette_loss, mvc_loss, pose_loss
