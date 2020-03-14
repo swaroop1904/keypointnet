@@ -74,7 +74,7 @@ def post_process_kp(prob, z, num_kp=10, vh=128, vw=128):
 
 
     z = tf.transpose(z, [0,3,1,2])
-    prob = tf.reshape(prob, [-1, num_kp, vh, vw])
+    prob = get_probability_distribution(prob)
 
     xx, yy = mesh_grid(vh)
 
@@ -83,6 +83,7 @@ def post_process_kp(prob, z, num_kp=10, vh=128, vw=128):
 
     z = tf.reduce_sum(prob*z, axis=[2,3])
     uv = tf.reshape(tf.stack([sx,sy], -1), [-1, num_kp, 2])
+    z = tf.reshape(z, [-1, num_kp, 1])
 
     return uv, z
 
@@ -142,7 +143,7 @@ def mvc_loss(uv0, uv1):
     '''
     inputs: 
             uv1: predicted 2D keypoint of the first image
-                 (batch_size, num_kp, 2)_
+                 (batch_size, num_kp, 2)
             uv0: projected 2D keypoints from the other image
                  (batch_size, num_kp, 2)
     '''
