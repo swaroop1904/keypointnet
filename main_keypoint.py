@@ -84,7 +84,7 @@ def keypointnet_train_step(data, batch_size):
             images[i] = data[f"img{i}"]
             mv_list[i] = mv
             mvi_list[i] = mvi
-        loss = keypoint_loss(prob, z, images, mv_list, mvi_list, batch_size)
+        loss = keypoint_loss(prob, z, images, mv_list, mvi_list, batch_size=batch_size)
     grads = tape.gradient(loss, keypointnet.trainable_variables)
     optim.apply_gradients(zip(grads, keypointnet.trainable_variables))
 
@@ -93,7 +93,7 @@ if __name__ == '__main__':
     dataset_dir = '/home/swaroop/Documents/others/MS/aml/project/chairs_with_keypoints/'
     t = Transformer(vw, vh, dataset_dir)
 
-    batch_size=1
+    batch_size=5
 
     # remove the files other tf record from here
     filenames = [dataset_dir + val for val in os.listdir(dataset_dir) if val.endswith('tfrecord')  ]
