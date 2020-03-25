@@ -5,3 +5,7 @@ output/*
 results/*
 *.h5
 *__pycache__*
+*.tfrecord
+chairs_with_keypoints/
+planes_with_keypoints/
+*.ipynb_checkpoints*
