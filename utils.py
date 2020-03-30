@@ -1,3 +1,11 @@
+"""
+This module implements the utility functions and loss functions required for
+keypoint implementation. The methods defined below have been adapted from
+or directly taken from the repo: 
+https://github.com/tensorflow/models/tree/master/research/keypointnet 
+
+"""
+
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Activation 
@@ -7,31 +15,34 @@ import numpy as np
 from copy import deepcopy
 
 def mesh_grid(h):
-    '''
-    creates a mesh grid with normalized pixel values
-    '''
+    """
+    Creates a mesh grid with normalized pixel values.
+    
+    """
     r = np.arange(0.5, h, 1) / (h / 2) - 1
     xx, yy = tf.meshgrid(r, -r)
     return tf.cast(xx, tf.float32), tf.cast(yy, tf.float32)
 
 # when testing need to set anneal to 0 
 def post_process_orient(orient_prob, anneal=1, orient_gt=None, vh=128, vw=128):
-    '''
-    post process the orient network output
+    """
+    Post process the orient network output
 
-    input:
+    
+    Args:
           orient_prob: (batch_size, 128, 128, 2)
           anneal: 1 -> use gt orientation (used during training)
                   0 -> use orient_pred (used during inference)
-          orient_gt: camera co-ordinates of NDC points (1,0,0) and (-1,0,0)
-                     (batch_size, 2, 2)
-    output:
-           out_xy: predicted camera co-ordinates of NDC points (1,0,0) and (-1,0,0)
-                   (batch_size, 2, 2)
+          orient_gt:   camera co-ordinates of NDC points (1,0,0) and (-1,0,0)
+                       (batch_size, 2, 2)
+    Returns:
+           out_xy:       predicted camera co-ordinates of NDC points (1,0,0) and
+                         (-1,0,0)
+                         (batch_size, 2, 2)
            orient_tiled: Tiled tensor for the orientation to be fed along with image
                          to the keypoint network
-                    (batch_size, 128, 128, 1)
-    '''
+                         (batch_size, 128, 128, 1)
+    """
 
     orient_prob = tf.transpose(orient_prob, [0,3,1,2])
     orient_prob = tf.reshape(orient_prob, [-1, 2, vh*vw])
@@ -55,6 +66,7 @@ def post_process_orient(orient_prob, anneal=1, orient_gt=None, vh=128, vw=128):
         orient_gt = tf.maximum(0, tf.sign(orient_gt[...,1]))
         orient = tf.round(orient_gt*anneal + orient_pred *(1-anneal)) 
 
+    # tile orientation to be used as one of the channels for keypointnet inp
     orient_tiled = tf.tile(tf.expand_dims(tf.expand_dims(orient, 1), 1),
                            [1, vh, vw, 1]) 
 
@@ -62,15 +74,16 @@ def post_process_orient(orient_prob, anneal=1, orient_gt=None, vh=128, vw=128):
 
 
 def post_process_kp(prob, z, num_kp=10, vh=128, vw=128):
-    '''
-    calculates the expected value of uv and z
-    uv is in normalized image coordinates system
+    """
+    Calculates the expected value of uv and z.
 
-    inputs:
-        prob, z: Output of keypoint network a image
+    Args:
+        prob, z: output of keypoint network a image
                 (batch_size,  128, 128, 10)
-
-    '''
+    Returns:
+        uv: expected value of u,v location in image coordinates system
+        z: expected value of z 
+    """
 
 
     z = tf.transpose(z, [0,3,1,2])
@@ -88,15 +101,19 @@ def post_process_kp(prob, z, num_kp=10, vh=128, vw=128):
     return uv, z
 
 def estimate_rotation(obj0, obj1, noise=0.1):
-    '''
-    estimates the rotation given coordinates of the keypoints of two views
-    inputs:
+    """
+    Estimates the rotation given coordinates of the keypoints of two views.
+
+    Uses proscutes algorithm to determine the orientation between the two
+    objects. 
+
+    Args:
             obj0: first set of 3D keypoints 
                   (batch_size, num_kp, 3)
             obj1: second set of 3D keypoints
                   (batch_size, num_kp, 3)
             noise: scalar noise added to keypoints
-    '''
+    """
 
     obj0 += tf.random.normal(tf.shape(obj0), mean=0, stddev=noise)
     obj1 += tf.random.normal(tf.shape(obj1), mean=0, stddev=noise)
@@ -120,8 +137,8 @@ def estimate_rotation(obj0, obj1, noise=0.1):
     return tf.matmul(ud, v, transpose_b=True)
 
 def pose_loss(gt_homogeneous, obj0, obj1, noise):
-    '''
-    inputs:
+    """
+    Args:
             obj0: first set of 3D keypoints 
                   (batch_size, num_kp, 3)
             obj1: second set of 3D keypoints
@@ -129,35 +146,34 @@ def pose_loss(gt_homogeneous, obj0, obj1, noise):
             gt_homogeneous: true rotation matrix
                   (batch_size, 4, 4)
             noise: scalar noise added to keypoints
-    '''
+    """
     estimated_rot_t = estimate_rotation(obj0, obj1, noise)
 
     gt_rotation = gt_homogeneous[:, :3, :3]
     frob = tf.sqrt(tf.reduce_sum(tf.square(estimated_rot_t - gt_rotation), axis=[1,2]))
 
-    return tf.reduce_mean(tf.square(frob)), \
-            2.0 * tf.reduce_mean(tf.asin(tf.minimum(1.0, frob / (2 * math.sqrt(2)))))
+    return 2.0 * tf.reduce_mean(tf.asin(tf.minimum(1.0, frob / (2 * math.sqrt(2)))))
 
 
 def mvc_loss(uv0, uv1):
-    '''
-    inputs: 
+    """
+    Args: 
             uv1: predicted 2D keypoint of the first image
                  (batch_size, num_kp, 2)
             uv0: projected 2D keypoints from the other image
                  (batch_size, num_kp, 2)
-    '''
+    """
 
     diff = tf.reduce_sum(tf.square(uv0-uv1), axis=[1,2])
     return tf.reduce_mean(diff)
     
 
 def silhouette_loss(input_img, prob, z, vh=128, vw=128, num_kp=10):
-    '''
-    inputs:
+    """
+    Args:
         prob, z: Output of keypoint network for a single image
                 (batch_size,  128, 128, 10)
-    '''
+    """
     mask = input_img[..., 3]
     mask = tf.cast(tf.greater(mask, tf.zeros_like(mask)), dtype=tf.float32)
 
@@ -169,9 +185,11 @@ def silhouette_loss(input_img, prob, z, vh=128, vw=128, num_kp=10):
     return sill
 
 def get_probability_distribution(prob, num_kp=10, vh=128, vw=128):
-    '''
-    converts the keypointnet output feature maps into prob distribution
-    '''
+    """
+    Converts the keypointnet output feature maps into prob distribution
+    by applying spatial softmax.
+
+    """
     prob = tf.transpose(prob, [0,3,1,2])
     prob = tf.reshape(prob, [-1, num_kp, vh*vw])
 
@@ -181,11 +199,12 @@ def get_probability_distribution(prob, num_kp=10, vh=128, vw=128):
     return prob
 
 def variance_loss(uv, prob, vh=128, vw=128, num_kp=10):
-    '''
-    inputs:
+    """
+
+    Args:
           uv is in ndc: (batch_size, 10, 2)
           prob is the keypointnet output (batch_size, 128, 128, 10)
-    '''    
+    """    
     prob = get_probability_distribution(prob)
     xx, yy = mesh_grid(vh)
 
@@ -203,12 +222,12 @@ def variance_loss(uv, prob, vh=128, vw=128, num_kp=10):
 
 
 def separation_loss(xyz, delta, batch_size):
-    '''
-    inputs:
+    """
+    Args:
            xyz: keypoints in camera co-ordinates (batch_size, num_kp, 3)
            delta: separation threshold. Incurs 0 cost if separation is greater
                   than delta  
-    '''
+    """
     num_kp = tf.shape(xyz)[1]
 
     t1 = tf.tile(xyz, [1,num_kp, 1])

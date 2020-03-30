@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =============================================================================
-"""Script to render object views from ShapeNet obj models.
+""" Script to render object views from ShapeNet obj models.
 
 Example usage:
   blender -b --python render.py -- -m root_folder -o output/ -s 128 -n 120 -fov 5
+
+This class has been directly taken from
+https://github.com/tensorflow/models/tree/master/research/keypointnet
 
 """
 from __future__ import print_function

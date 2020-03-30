@@ -1,3 +1,7 @@
+"""
+This module includes methods for creation of keypointnet and orientnet
+
+"""
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Input, Conv2D, LeakyReLU, BatchNormalization, Activation

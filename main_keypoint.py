@@ -1,3 +1,7 @@
+"""
+This module defines the training loop for keypointnet
+"""
+
 import os
 import numpy as np
 import tensorflow as tf
@@ -8,15 +12,17 @@ from utils import post_process_orient, Transformer, post_process_kp
 from utils import pose_loss, variance_loss, separation_loss, silhouette_loss, mvc_loss, pose_loss
 from utils import Transformer
 from data_generation import create_data_generator
+import argparse
 
 def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, batch_size=2):
-    '''
-    calculates the loss for the keypointnet
-    inputs:
-           prob, z: list of the outputs of keypoint network for each of the image
-                    (batch_size,  128, 128, 10)
+    """
+    Calculates the loss for the keypointnet.
+
+    Args:
+        prob, z: list of the outputs of keypoint network for each of the image
+                 (batch_size,  128, 128, 10)
         
-    '''
+    """
     sil_loss = 0.0
     var_loss = 0.0
     sep_loss = 0.0
@@ -44,7 +50,7 @@ def keypoint_loss(prob, z, images, mv_list, mvi_list, delta=0.05, num_kp=10, bat
         sep_loss += separation_loss(t.unproject(uvz[i])[:, :, :3], delta, batch_size)
         mv_loss += mvc_loss(uvz_proj[i][:, :, :2], uvz[1 - i][:, :, :2])
 
-    _, p_loss = pose_loss(
+    p_loss = pose_loss(
       tf.matmul(mvi_list[0], mv_list[1]),
       t.unproject(uvz[0])[:, :, :3],
       t.unproject(uvz[1])[:, :, :3],
@@ -89,20 +95,42 @@ def keypointnet_train_step(data, batch_size):
     optim.apply_gradients(zip(grads, keypointnet.trainable_variables))
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser("./main_keypoint.py")
+    parser.add_argument(
+        '--dataset_dir', '-d',
+        type=str,
+        required=True,
+        help='Dataset to train with. No Default',
+    )
+    parser.add_argument(
+        '--batch_size', '-bs',
+        type=int,
+        default=5,
+        help='Batch size',
+    )
+    parser.add_argument(
+        '--num_epochs', '-n',
+        type=int,
+        required=True,
+        help='Batch size',
+    )
+
+    FLAGS, unparsed = parser.parse_known_args()
+
+    dataset_dir = FLAGS.dataset_dir 
+    batch_size = FLAGS.batch_size 
+    num_epochs = FLAGS.num_epochs
+
     vw, vh = 128, 128
-    dataset_dir = '/home/swaroop/Documents/others/MS/aml/project/chairs_with_keypoints/'
     t = Transformer(vw, vh, dataset_dir)
 
-    batch_size=5
-
-    # remove the files other tf record from here
+    # ignore files other than tf records 
     filenames = [dataset_dir + val for val in os.listdir(dataset_dir) if val.endswith('tfrecord')  ]
     dataset = create_data_generator(filenames, batch_size=batch_size)
 
     orient_net = orientation_model()
     optim = tf.keras.optimizers.Adam(lr=1e-3)
-    num_epochs = 3
-
+    
     keypointnet = keypoint_model()
     
     train_sil_loss = tf.keras.metrics.Mean('train_sil_loss', dtype=tf.float32)

@@ -1,3 +1,7 @@
+"""
+This module defines the training loop for Orientnet
+"""
+
 import os
 import numpy as np
 import tensorflow as tf
@@ -9,13 +13,14 @@ from utils import Transformer
 from data_generation import create_data_generator
 
 def orientation_loss(orient, mv):
-    '''
-    inputs: 
-           orient: (batch_size,2,2)
-           mv: model view matrix (batch_size, 4, 4)
-    output:
-           orient_loss: (batch_size, 2)
-    '''
+    """
+
+      Args: 
+            orient: (batch_size,2,2)
+            mv: model view matrix (batch_size, 4, 4)
+      Returns:
+            orient_loss: (batch_size, 2)
+    """
     xp_axis = tf.tile(
         tf.constant([[[1.0, 0, 0, 1], [-1.0, 0, 0, 1]]]), [tf.shape(orient)[0], 1, 1]
         )
@@ -37,11 +42,34 @@ def orient_net_train_step(rgb, mv):
     return orient
 
 if __name__ == '__main__':
-    vw, vh = 128, 128
-    dataset_dir = '/home/swaroop/Documents/others/MS/aml/project/chairs_with_keypoints/'
-    t = Transformer(vw, vh, dataset_dir)
+    parser = argparse.ArgumentParser("./main_orientnet.py")
+    parser.add_argument(
+        '--dataset_dir', '-d',
+        type=str,
+        required=True,
+        help='Dataset to train with. No Default',
+    )
+    parser.add_argument(
+        '--batch_size', '-bs',
+        type=int,
+        default=5,
+        help='Batch size',
+    )
+    parser.add_argument(
+        '--num_epochs', '-n',
+        type=int,
+        required=True,
+        help='Batch size',
+    )
 
-    batch_size=64
+    FLAGS, unparsed = parser.parse_known_args()
+
+    dataset_dir = FLAGS.dataset_dir 
+    batch_size = FLAGS.batch_size 
+    num_epochs = FLAGS.num_epochs
+
+    vw, vh = 128, 128
+    t = Transformer(vw, vh, dataset_dir)
 
     # remove the files other tf record from here
     filenames = [dataset_dir + val for val in os.listdir(dataset_dir) if val.endswith('tfrecord')  ]
@@ -49,7 +77,6 @@ if __name__ == '__main__':
 
     orient_net = orientation_model()
     optim = tf.keras.optimizers.Adam(lr=1e-3)
-    num_epochs = 3
 
     train_orient_loss = tf.keras.metrics.Mean('train_orient_loss', dtype=tf.float32)
 
