@@ -9,3 +9,4 @@ results/*
 chairs_with_keypoints/
 planes_with_keypoints/
 *.ipynb_checkpoints*
+.vscode/
