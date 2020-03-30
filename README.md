@@ -15,4 +15,4 @@ Latent 3D Keypoints via End-to-end Geometric Reasoning
 
 ```
 
-The functions defined in this repo has been either adapted from or directly taken (Transformer class, blender render script and few of the loss function) from https://github.com/tensorflow/models/tree/master/research/keypointnet and follows the original license under the original repo. 
+The functions defined in this repo has been either adapted from or directly taken (Transformer class, blender render script and few of the loss functions) from https://github.com/tensorflow/models/tree/master/research/keypointnet and follows the license under the original repo. 
